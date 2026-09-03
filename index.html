@@ -57,6 +57,12 @@
       <label>Próg prawdopodobieństwa opadów (%)
         <input type="number" id="rainThreshold" min="0" max="100" required>
       </label>
+      <label>Próg niskiej temperatury (°C) - poniżej może być ślisko/lód
+        <input type="number" id="tempThreshold" min="-20" max="15" step="1" required>
+      </label>
+      <label>Próg silnego wiatru (km/h)
+        <input type="number" id="windThreshold" min="0" max="150" step="1" required>
+      </label>
       <button type="submit" class="save-btn">Zapisz ustawienia</button>
       <div id="settingsStatus" class="status-msg"></div>
     </form>

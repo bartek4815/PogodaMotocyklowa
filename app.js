@@ -15,7 +15,9 @@ var DEFAULT_SETTINGS = {
   durMorning: 30,
   depAfternoon: '15:00',
   durAfternoon: 45,
-  rainThreshold: 30
+  rainThreshold: 30,
+  tempThreshold: 2,
+  windThreshold: 40
 };
 
 var WEATHER_CODES = {
@@ -136,7 +138,7 @@ function extractPoint(locationData, hourKey) {
 
 // ---------- Logika decyzji: motor czy samochod ----------
 
-function evaluateTrip(fromData, toData, depTime, durationMin, threshold) {
+function evaluateTrip(fromData, toData, depTime, durationMin, threshold, tempThreshold, windThreshold) {
   var dateStr = todayDateStr();
   var depMinutes = timeToMinutes(depTime);
   var arrMinutes = depMinutes + parseInt(durationMin, 10);
@@ -162,11 +164,11 @@ function evaluateTrip(fromData, toData, depTime, durationMin, threshold) {
       carRecommended = true;
       reasons.push('Ryzyko opadów ' + p.precipProb + '% ' + label + ' o ' + p.time.substr(11, 5));
     }
-    if (p.temp <= 2) {
+    if (p.temp <= tempThreshold) {
       carRecommended = true;
       reasons.push('Niska temperatura ' + p.temp + '°C ' + label + ' - możliwy lód');
     }
-    if (p.wind >= 40) {
+    if (p.wind >= windThreshold) {
       carRecommended = true;
       reasons.push('Silny wiatr ' + Math.round(p.wind) + ' km/h ' + label);
     }
@@ -237,10 +239,10 @@ function loadAllWeather() {
     cachedData = { start: pair[0], end: pair[1] };
     homeStatus.textContent = '';
 
-    var toWork = evaluateTrip(cachedData.start, cachedData.end, settings.depMorning, settings.durMorning, settings.rainThreshold);
+    var toWork = evaluateTrip(cachedData.start, cachedData.end, settings.depMorning, settings.durMorning, settings.rainThreshold, settings.tempThreshold, settings.windThreshold);
     renderTripCard('tripToWork', 'Dojazd do pracy', settings.startName, settings.endName, settings.depMorning, toWork);
 
-    var toHome = evaluateTrip(cachedData.end, cachedData.start, settings.depAfternoon, settings.durAfternoon, settings.rainThreshold);
+    var toHome = evaluateTrip(cachedData.end, cachedData.start, settings.depAfternoon, settings.durAfternoon, settings.rainThreshold, settings.tempThreshold, settings.windThreshold);
     renderTripCard('tripHome', 'Powrót do domu', settings.endName, settings.startName, settings.depAfternoon, toHome);
 
     renderHourlyTable('weatherStart', settings.startName, cachedData.start);
@@ -263,6 +265,8 @@ function fillSettingsForm() {
   document.getElementById('depAfternoon').value = s.depAfternoon;
   document.getElementById('durAfternoon').value = s.durAfternoon;
   document.getElementById('rainThreshold').value = s.rainThreshold;
+  document.getElementById('tempThreshold').value = s.tempThreshold;
+  document.getElementById('windThreshold').value = s.windThreshold;
 
   var statusEl = document.getElementById('settingsStatus');
   if (s.startLabel && s.endLabel) {
@@ -289,10 +293,14 @@ function handleSaveSettings(ev) {
     depAfternoon: document.getElementById('depAfternoon').value,
     durAfternoon: parseInt(document.getElementById('durAfternoon').value, 10) || 0,
     rainThreshold: parseInt(document.getElementById('rainThreshold').value, 10),
+    tempThreshold: parseFloat(document.getElementById('tempThreshold').value),
+    windThreshold: parseFloat(document.getElementById('windThreshold').value),
     startLat: current.startLat, startLon: current.startLon, startLabel: current.startLabel,
     endLat: current.endLat, endLon: current.endLon, endLabel: current.endLabel
   };
   if (isNaN(s.rainThreshold)) s.rainThreshold = 30;
+  if (isNaN(s.tempThreshold)) s.tempThreshold = 2;
+  if (isNaN(s.windThreshold)) s.windThreshold = 40;
 
   var needStart = (newStartName !== current.startName) || !current.startLat;
   var needEnd = (newEndName !== current.endName) || !current.endLat;
