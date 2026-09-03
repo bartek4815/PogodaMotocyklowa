@@ -3,8 +3,11 @@
 var GEOCODE_URL = 'https://geocoding-api.open-meteo.com/v1/search';
 var FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
 var STORAGE_KEY = 'pogodaMotoSettings_v1';
+var MAX_DAY_OFFSET = 5;
 
 var RAIN_CODES = new Set([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 71, 73, 75, 77, 80, 81, 82, 85, 86, 95, 96, 99]);
+
+var POLISH_MONTHS = ['stycznia', 'lutego', 'marca', 'kwietnia', 'maja', 'czerwca', 'lipca', 'sierpnia', 'września', 'października', 'listopada', 'grudnia'];
 
 var DEFAULT_SETTINGS = {
   startName: 'Kluszkowce',
@@ -17,7 +20,10 @@ var DEFAULT_SETTINGS = {
   durAfternoon: 45,
   rainThreshold: 30,
   tempThreshold: 2,
-  windThreshold: 40
+  windThreshold: 40,
+  enableRain: true,
+  enableTemp: true,
+  enableWind: true
 };
 
 var WEATHER_CODES = {
@@ -34,6 +40,7 @@ var WEATHER_CODES = {
 };
 
 var cachedData = null;
+var selectedDayOffset = 0;
 
 // ---------- Ustawienia (localStorage) ----------
 
@@ -51,15 +58,25 @@ function saveSettings(s) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
 }
 
-// ---------- Pomocnicze funkcje czasu ----------
+// ---------- Pomocnicze funkcje czasu i dat ----------
 
 function pad2(n) {
   return n < 10 ? '0' + n : '' + n;
 }
 
-function todayDateStr() {
+function dateStrForOffset(offset) {
   var d = new Date();
+  d.setDate(d.getDate() + offset);
   return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+}
+
+function dayLabel(offset) {
+  var d = new Date();
+  d.setDate(d.getDate() + offset);
+  var weekday = d.toLocaleDateString('pl-PL', { weekday: 'long' });
+  var label = weekday + ' (' + d.getDate() + ' ' + POLISH_MONTHS[d.getMonth()] + ')';
+  if (offset === 0) label = 'Dziś - ' + label;
+  return label;
 }
 
 function timeToMinutes(t) {
@@ -108,7 +125,7 @@ function fetchForecastPair(lat1, lon1, lat2, lon2) {
     latitude: lat1 + ',' + lat2,
     longitude: lon1 + ',' + lon2,
     hourly: 'temperature_2m,precipitation_probability,precipitation,weathercode,windspeed_10m',
-    forecast_days: '2',
+    forecast_days: '7',
     timezone: 'auto'
   });
   return fetch(FORECAST_URL + '?' + params.toString()).then(function (res) {
@@ -138,8 +155,8 @@ function extractPoint(locationData, hourKey) {
 
 // ---------- Logika decyzji: motor czy samochod ----------
 
-function evaluateTrip(fromData, toData, depTime, durationMin, threshold, tempThreshold, windThreshold) {
-  var dateStr = todayDateStr();
+function evaluateTrip(fromData, toData, depTime, durationMin, opts) {
+  var dateStr = opts.dateStr;
   var depMinutes = timeToMinutes(depTime);
   var arrMinutes = depMinutes + parseInt(durationMin, 10);
   var depKey = minutesToHourKey(dateStr, depMinutes);
@@ -148,34 +165,44 @@ function evaluateTrip(fromData, toData, depTime, durationMin, threshold, tempThr
   var arrPoint = extractPoint(toData, arrKey);
 
   if (!depPoint || !arrPoint) {
-    return { ok: false, reason: 'Brak danych prognozy dla wybranej godziny (sprawdź, czy godziny mieszczą się w najbliższych 48h).' };
+    return { ok: false, reason: 'Brak danych prognozy dla wybranego dnia/godziny (Open-Meteo udostępnia prognozę na najbliższe dni).' };
   }
 
   var reasons = [];
   var carRecommended = false;
+  var anyEnabled = opts.enableRain || opts.enableTemp || opts.enableWind;
 
   [{ p: depPoint, label: 'na starcie' }, { p: arrPoint, label: 'na mecie' }].forEach(function (item) {
     var p = item.p;
     var label = item.label;
-    if (RAIN_CODES.has(p.code)) {
-      carRecommended = true;
-      reasons.push('Opady (' + weatherCodeInfo(p.code)[0].toLowerCase() + ') ' + label + ' o ' + p.time.substr(11, 5));
-    } else if (p.precipProb >= threshold) {
-      carRecommended = true;
-      reasons.push('Ryzyko opadów ' + p.precipProb + '% ' + label + ' o ' + p.time.substr(11, 5));
+
+    if (opts.enableRain) {
+      if (RAIN_CODES.has(p.code)) {
+        carRecommended = true;
+        reasons.push('Opady (' + weatherCodeInfo(p.code)[0].toLowerCase() + ') ' + label + ' o ' + p.time.substr(11, 5));
+      } else if (p.precipProb >= opts.threshold) {
+        carRecommended = true;
+        reasons.push('Ryzyko opadów ' + p.precipProb + '% ' + label + ' o ' + p.time.substr(11, 5));
+      }
     }
-    if (p.temp <= tempThreshold) {
+
+    if (opts.enableTemp && p.temp <= opts.tempThreshold) {
       carRecommended = true;
       reasons.push('Niska temperatura ' + p.temp + '°C ' + label + ' - możliwy lód');
     }
-    if (p.wind >= windThreshold) {
+
+    if (opts.enableWind && p.wind >= opts.windThreshold) {
       carRecommended = true;
       reasons.push('Silny wiatr ' + Math.round(p.wind) + ' km/h ' + label);
     }
   });
 
   if (reasons.length === 0) {
-    reasons.push('Bez opadów, temp. ' + depPoint.temp + '°C - ' + arrPoint.temp + '°C, wiatr do ' + Math.round(Math.max(depPoint.wind, arrPoint.wind)) + ' km/h');
+    if (!anyEnabled) {
+      reasons.push('Wszystkie kryteria są wyłączone w Ustawieniach.');
+    } else {
+      reasons.push('Bez przekroczonych progów, temp. ' + depPoint.temp + '°C - ' + arrPoint.temp + '°C, wiatr do ' + Math.round(Math.max(depPoint.wind, arrPoint.wind)) + ' km/h');
+    }
   }
 
   return { ok: true, carRecommended: carRecommended, reasons: reasons, depPoint: depPoint, arrPoint: arrPoint };
@@ -204,8 +231,7 @@ function renderTripCard(containerId, titleText, fromLabel, toLabel, depTime, res
     '</div>';
 }
 
-function renderHourlyTable(containerId, label, locationData) {
-  var dateStr = todayDateStr();
+function renderHourlyTable(containerId, label, locationData, dateStr) {
   var rows = '';
   for (var h = 5; h <= 21; h++) {
     var key = dateStr + 'T' + pad2(h) + ':00';
@@ -218,14 +244,57 @@ function renderHourlyTable(containerId, label, locationData) {
     '<h3>' + label + '</h3><table class="hourly-table"><thead><tr><th>Godz.</th><th>Pogoda</th><th>Temp.</th><th>Opady</th><th>Wiatr</th></tr></thead><tbody>' + rows + '</tbody></table>';
 }
 
-// ---------- Glowna funkcja ladowania danych ----------
+// ---------- Wybor dnia ----------
+
+function buildDayOptions() {
+  var sel = document.getElementById('daySelect');
+  sel.innerHTML = '';
+  for (var i = 0; i <= MAX_DAY_OFFSET; i++) {
+    var opt = document.createElement('option');
+    opt.value = String(i);
+    opt.textContent = dayLabel(i);
+    sel.appendChild(opt);
+  }
+  sel.value = String(selectedDayOffset);
+}
+
+// ---------- Renderowanie na podstawie juz pobranych danych (bez nowego fetch) ----------
+
+function renderForSelectedDay() {
+  if (!cachedData) return;
+  var settings = loadSettings();
+  var dateStr = dateStrForOffset(selectedDayOffset);
+
+  var opts = {
+    threshold: settings.rainThreshold,
+    tempThreshold: settings.tempThreshold,
+    windThreshold: settings.windThreshold,
+    enableRain: settings.enableRain,
+    enableTemp: settings.enableTemp,
+    enableWind: settings.enableWind,
+    dateStr: dateStr
+  };
+
+  var toWork = evaluateTrip(cachedData.start, cachedData.end, settings.depMorning, settings.durMorning, opts);
+  renderTripCard('tripToWork', 'Dojazd do pracy', settings.startName, settings.endName, settings.depMorning, toWork);
+
+  var toHome = evaluateTrip(cachedData.end, cachedData.start, settings.depAfternoon, settings.durAfternoon, opts);
+  renderTripCard('tripHome', 'Powrót do domu', settings.endName, settings.startName, settings.depAfternoon, toHome);
+
+  renderHourlyTable('weatherStart', settings.startName, cachedData.start, dateStr);
+  renderHourlyTable('weatherEnd', settings.endName, cachedData.end, dateStr);
+
+  document.getElementById('weatherDayLabel').textContent = 'Pogoda na: ' + dayLabel(selectedDayOffset);
+}
+
+// ---------- Glowna funkcja pobierania danych (fetch) ----------
 
 function loadAllWeather() {
   var settings = loadSettings();
   var homeStatus = document.getElementById('homeStatus');
 
   if (!settings.startLat || !settings.endLat) {
-    homeStatus.textContent = 'Uzupełnij lokalizacje w zakładce Ustawienia.';
+    homeStatus.textContent = 'Uzupełnij lokalizacje w zakładce Lokalizacja.';
     document.getElementById('tripToWork').innerHTML = '';
     document.getElementById('tripHome').innerHTML = '';
     document.getElementById('weatherStart').innerHTML = '';
@@ -238,25 +307,54 @@ function loadAllWeather() {
   fetchForecastPair(settings.startLat, settings.startLon, settings.endLat, settings.endLon).then(function (pair) {
     cachedData = { start: pair[0], end: pair[1] };
     homeStatus.textContent = '';
-
-    var toWork = evaluateTrip(cachedData.start, cachedData.end, settings.depMorning, settings.durMorning, settings.rainThreshold, settings.tempThreshold, settings.windThreshold);
-    renderTripCard('tripToWork', 'Dojazd do pracy', settings.startName, settings.endName, settings.depMorning, toWork);
-
-    var toHome = evaluateTrip(cachedData.end, cachedData.start, settings.depAfternoon, settings.durAfternoon, settings.rainThreshold, settings.tempThreshold, settings.windThreshold);
-    renderTripCard('tripHome', 'Powrót do domu', settings.endName, settings.startName, settings.depAfternoon, toHome);
-
-    renderHourlyTable('weatherStart', settings.startName, cachedData.start);
-    renderHourlyTable('weatherEnd', settings.endName, cachedData.end);
-
+    renderForSelectedDay();
     document.getElementById('lastUpdate').textContent = 'Ostatnia aktualizacja: ' + new Date().toLocaleTimeString('pl-PL');
   }).catch(function (err) {
     homeStatus.textContent = 'Błąd: ' + err.message;
   });
 }
 
-// ---------- Ustawienia: formularz ----------
+// ---------- Ustawienia: zakladka "Ustawienia" (algorytm) ----------
 
-function fillSettingsForm() {
+function fillAlgorithmForm() {
+  var s = loadSettings();
+  document.getElementById('rainThreshold').value = s.rainThreshold;
+  document.getElementById('tempThreshold').value = s.tempThreshold;
+  document.getElementById('windThreshold').value = s.windThreshold;
+  document.getElementById('enableRain').checked = !!s.enableRain;
+  document.getElementById('enableTemp').checked = !!s.enableTemp;
+  document.getElementById('enableWind').checked = !!s.enableWind;
+}
+
+function handleSaveAlgorithm(ev) {
+  ev.preventDefault();
+  var current = loadSettings();
+
+  var s = Object.assign({}, current, {
+    rainThreshold: parseInt(document.getElementById('rainThreshold').value, 10),
+    tempThreshold: parseFloat(document.getElementById('tempThreshold').value),
+    windThreshold: parseFloat(document.getElementById('windThreshold').value),
+    enableRain: document.getElementById('enableRain').checked,
+    enableTemp: document.getElementById('enableTemp').checked,
+    enableWind: document.getElementById('enableWind').checked
+  });
+
+  if (isNaN(s.rainThreshold)) s.rainThreshold = 30;
+  if (isNaN(s.tempThreshold)) s.tempThreshold = 2;
+  if (isNaN(s.windThreshold)) s.windThreshold = 40;
+
+  saveSettings(s);
+
+  var statusEl = document.getElementById('settingsStatus');
+  statusEl.textContent = 'Zapisano ustawienia.';
+  statusEl.className = 'status-msg status-ok';
+
+  renderForSelectedDay();
+}
+
+// ---------- Ustawienia: zakladka "Lokalizacja" ----------
+
+function fillLocationForm() {
   var s = loadSettings();
   document.getElementById('startName').value = s.startName;
   document.getElementById('endName').value = s.endName;
@@ -264,20 +362,17 @@ function fillSettingsForm() {
   document.getElementById('durMorning').value = s.durMorning;
   document.getElementById('depAfternoon').value = s.depAfternoon;
   document.getElementById('durAfternoon').value = s.durAfternoon;
-  document.getElementById('rainThreshold').value = s.rainThreshold;
-  document.getElementById('tempThreshold').value = s.tempThreshold;
-  document.getElementById('windThreshold').value = s.windThreshold;
 
-  var statusEl = document.getElementById('settingsStatus');
+  var statusEl = document.getElementById('locationStatus');
   if (s.startLabel && s.endLabel) {
     statusEl.textContent = 'Zapisane lokalizacje: ' + s.startLabel + ' / ' + s.endLabel;
     statusEl.className = 'status-msg status-ok';
   }
 }
 
-function handleSaveSettings(ev) {
+function handleSaveLocation(ev) {
   ev.preventDefault();
-  var statusEl = document.getElementById('settingsStatus');
+  var statusEl = document.getElementById('locationStatus');
   statusEl.className = 'status-msg';
   statusEl.textContent = 'Zapisywanie i wyszukiwanie lokalizacji...';
 
@@ -285,22 +380,14 @@ function handleSaveSettings(ev) {
   var newStartName = document.getElementById('startName').value.trim();
   var newEndName = document.getElementById('endName').value.trim();
 
-  var s = {
+  var s = Object.assign({}, current, {
     startName: newStartName,
     endName: newEndName,
     depMorning: document.getElementById('depMorning').value,
     durMorning: parseInt(document.getElementById('durMorning').value, 10) || 0,
     depAfternoon: document.getElementById('depAfternoon').value,
-    durAfternoon: parseInt(document.getElementById('durAfternoon').value, 10) || 0,
-    rainThreshold: parseInt(document.getElementById('rainThreshold').value, 10),
-    tempThreshold: parseFloat(document.getElementById('tempThreshold').value),
-    windThreshold: parseFloat(document.getElementById('windThreshold').value),
-    startLat: current.startLat, startLon: current.startLon, startLabel: current.startLabel,
-    endLat: current.endLat, endLon: current.endLon, endLabel: current.endLabel
-  };
-  if (isNaN(s.rainThreshold)) s.rainThreshold = 30;
-  if (isNaN(s.tempThreshold)) s.tempThreshold = 2;
-  if (isNaN(s.windThreshold)) s.windThreshold = 40;
+    durAfternoon: parseInt(document.getElementById('durAfternoon').value, 10) || 0
+  });
 
   var needStart = (newStartName !== current.startName) || !current.startLat;
   var needEnd = (newEndName !== current.endName) || !current.endLat;
@@ -342,11 +429,20 @@ function initTabs() {
 
 window.addEventListener('load', function () {
   initTabs();
-  fillSettingsForm();
+  buildDayOptions();
+
+  document.getElementById('daySelect').addEventListener('change', function () {
+    selectedDayOffset = parseInt(this.value, 10);
+    renderForSelectedDay();
+  });
+
+  fillAlgorithmForm();
+  fillLocationForm();
   loadAllWeather();
 
   document.getElementById('refreshBtn').addEventListener('click', loadAllWeather);
-  document.getElementById('settingsForm').addEventListener('submit', handleSaveSettings);
+  document.getElementById('settingsForm').addEventListener('submit', handleSaveAlgorithm);
+  document.getElementById('locationForm').addEventListener('submit', handleSaveLocation);
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('service-worker.js').catch(function () {});
