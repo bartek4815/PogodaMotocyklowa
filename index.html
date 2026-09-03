@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Pogoda Motocyklowa</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="style.css">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Pogoda Moto">
+<meta name="theme-color" content="#1d4ed8">
+</head>
+<body>
+
+<header class="app-header">
+  <h1>Pogoda Motocyklowa</h1>
+  <button id="refreshBtn" class="refresh-btn" title="Odśwież dane pogodowe">🔄</button>
+</header>
+<div id="lastUpdate" class="last-update"></div>
+
+<main id="content">
+
+  <section id="home-view" class="view active">
+    <div id="homeStatus" class="status-msg"></div>
+    <div class="card" id="tripToWork"></div>
+    <div class="card" id="tripHome"></div>
+  </section>
+
+  <section id="weather-view" class="view">
+    <div class="card" id="weatherStart"></div>
+    <div class="card" id="weatherEnd"></div>
+  </section>
+
+  <section id="settings-view" class="view">
+    <form id="settingsForm" class="settings-form">
+      <label>Miejscowość startowa (dom)
+        <input type="text" id="startName" required>
+      </label>
+      <label>Miejscowość docelowa (praca)
+        <input type="text" id="endName" required>
+      </label>
+      <label>Godzina wyjazdu rano
+        <input type="time" id="depMorning" required>
+      </label>
+      <label>Czas dojazdu rano (min)
+        <input type="number" id="durMorning" min="1" max="300" required>
+      </label>
+      <label>Godzina wyjazdu powrotnego
+        <input type="time" id="depAfternoon" required>
+      </label>
+      <label>Czas dojazdu powrotnego (min)
+        <input type="number" id="durAfternoon" min="1" max="300" required>
+      </label>
+      <label>Próg prawdopodobieństwa opadów (%)
+        <input type="number" id="rainThreshold" min="0" max="100" required>
+      </label>
+      <button type="submit" class="save-btn">Zapisz ustawienia</button>
+      <div id="settingsStatus" class="status-msg"></div>
+    </form>
+    <p class="hint">Pogoda sprawdzana jest w punkcie startowym o godzinie wyjazdu oraz w punkcie docelowym o wyliczonej godzinie przyjazdu (wyjazd + czas dojazdu). To uproszczenie trasy do dwóch punktów - nie uwzględnia pogody dokładnie na środku drogi.</p>
+  </section>
+
+</main>
+
+<nav class="tabbar">
+  <button class="tab-btn active" data-view="home-view"><span class="tab-icon">🏠</span><span>Główny</span></button>
+  <button class="tab-btn" data-view="weather-view"><span class="tab-icon">⛅</span><span>Pogoda</span></button>
+  <button class="tab-btn" data-view="settings-view"><span class="tab-icon">⚙️</span><span>Ustawienia</span></button>
+</nav>
+
+<script src="app.js"></script>
+</body>
+</html>
