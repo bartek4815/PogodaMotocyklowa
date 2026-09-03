@@ -1,4 +1,4 @@
-var CACHE_NAME = 'pogoda-motocyklowa-v1';
+var CACHE_NAME = 'pogoda-motocyklowa-v2';
 var urlsToCache = [
   './',
   './index.html',
@@ -34,15 +34,24 @@ self.addEventListener('activate', function (event) {
 self.addEventListener('fetch', function (event) {
   var url = event.request.url;
 
-  // Dane pogodowe maja byc zawsze swieze - nigdy nie cachujemy zapytan do Open-Meteo,
-  // przechodza normalnie do sieci (dzialaja tylko online, co jest oczekiwane dla pogody).
+  // Dane pogodowe maja byc zawsze swieze - nigdy nie cachujemy zapytan do Open-Meteo.
   if (url.indexOf('open-meteo.com') !== -1) {
     return;
   }
 
+  // Powloka aplikacji (HTML/CSS/JS): najpierw siec (zawsze swiezy kod gdy jest internet),
+  // cache tylko jako fallback offline. Dzieki temu kolejne aktualizacje aplikacji
+  // beda widoczne od razu po odswiezeniu, bez czekania na wykrycie zmiany w samym
+  // pliku service-worker.js.
   event.respondWith(
-    caches.match(event.request).then(function (response) {
-      return response || fetch(event.request);
+    fetch(event.request).then(function (response) {
+      var responseClone = response.clone();
+      caches.open(CACHE_NAME).then(function (cache) {
+        cache.put(event.request, responseClone);
+      });
+      return response;
+    }).catch(function () {
+      return caches.match(event.request);
     })
   );
 });
